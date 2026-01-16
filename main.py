@@ -4,7 +4,7 @@ import requests
 
 app = FastAPI(title="Spotify Downloader API")
 
-# Allow all origins (WordPress or other frontend can call)
+# Allow all origins (WordPress/front-end)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,17 +18,13 @@ def home():
 
 @app.get("/download")
 def download_spotify(url: str):
-    """
-    Input: Spotify track or playlist URL
-    Output: JSON with download_url and title
-    """
     session = requests.Session()
     session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-    # Step 1: Visit Spotdown homepage
+    # Step 1: Visit homepage
     session.get("https://spotdown.org")
 
-    # Step 2: Check metadata
+    # Step 2: Metadata check
     check_api = "https://spotdown.org/api/check-direct-download"
     res = session.get(check_api, params={"url": url}, headers={"Referer": "https://spotdown.org/"})
 
@@ -36,30 +32,28 @@ def download_spotify(url: str):
         raise HTTPException(status_code=400, detail="Failed to fetch metadata")
 
     data = res.json()
-    type_field = data.get("type", "").lower()
 
-    # ---------------- Single track ----------------
-    if type_field in ["track", "song", "single"]:
-        download_url = data.get("url")
+    # Try multiple ways to get download URL
+    download_url = None
+    title = "song"
+
+    # Case 1: Direct URL
+    if "url" in data:
+        download_url = data["url"]
         title = data.get("title", "song")
-        if not download_url:
-            raise HTTPException(status_code=400, detail="Download URL not found")
-        return {"download_url": download_url, "title": title}
 
-    # ---------------- Playlist ----------------
-    elif type_field in ["playlist", "playlist_track"]:
-        tracks = data.get("tracks", [])
-        if not tracks:
-            raise HTTPException(status_code=400, detail="No tracks found in playlist")
-
-        # Return first track only (can be extended later)
-        first_track = tracks[0]
+    # Case 2: Playlist / tracks array
+    elif "tracks" in data and isinstance(data["tracks"], list) and len(data["tracks"]) > 0:
+        first_track = data["tracks"][0]
         download_url = first_track.get("url")
         title = first_track.get("title", "song")
-        if not download_url:
-            raise HTTPException(status_code=400, detail="Download URL not found")
-        return {"download_url": download_url, "title": title}
 
-    # ---------------- Unknown type ----------------
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid type: {type_field}")
+    # Case 3: Fallback - check keys
+    elif "download_url" in data:
+        download_url = data["download_url"]
+        title = data.get("title", "song")
+
+    if not download_url:
+        raise HTTPException(status_code=400, detail="Download URL not found")
+
+    return {"download_url": download_url, "title": title}
